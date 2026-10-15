@@ -70,7 +70,9 @@ The real-model evaluation runner was attempted twice. One trial was blocked by
 client approval and one failed during MCP startup; both are recorded in
 `agent-model-eval-attempts.jsonl`. Neither trial produced a scored model success
 rate. Linux and Windows CI execution, Windows ACL and loopback checks, cross-OS
-live smoke, and the upstream extraction PR remain open release evidence.
+live smoke, and upstream acceptance remain open release evidence. The narrow
+[shared-engine extraction PR](https://github.com/deepfounder-ai/desigma/pull/2)
+was submitted as a draft after 776 focused tests passed on macOS.
 
 ## Earlier local verification evidence (2026-10-14)
 
