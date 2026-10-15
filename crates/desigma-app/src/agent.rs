@@ -158,14 +158,16 @@ fn private_directory(path: &std::path::Path) -> std::io::Result<()> {
     // Windows AppData inherits the user's ACL. Never publish in a shared override directory.
     #[cfg(windows)]
     {
-        let status = std::process::Command::new("icacls")
-            .arg(path)
-            .args(["/inheritance:r", "/grant:r"])
-            .arg(format!("{}:(OI)(CI)F", std::env::var("USERNAME").map_err(std::io::Error::other)?))
-            .output()?;
-        if !status.status.success() {
-            return Err(std::io::Error::other("Cannot restrict endpoint directory ACL"));
-        }
+        restrict_windows_acl(path, &std::env::var("USERNAME").map_err(std::io::Error::other)?)?;
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn restrict_windows_acl(path: &std::path::Path, username: &str) -> std::io::Result<()> {
+    let status = std::process::Command::new("icacls").arg(path).args(["/inheritance:r", "/grant:r"]).arg(format!("{username}:(OI)(CI)F")).output()?;
+    if !status.status.success() {
+        return Err(std::io::Error::other("Cannot restrict endpoint directory ACL"));
     }
     Ok(())
 }
@@ -923,5 +925,60 @@ mod tests {
     fn disconnected_client_cancels_queued_write() {
         let (_, queued) = socket_request(json!({"token":"secret","document_id":"document","tool":"desigma_apply_ops","args":{}}), true);
         assert!(queued.expect("authenticated request was queued").cancelled.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn authenticated_loopback_request_reaches_editor_and_returns_reply() {
+        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let server = std::thread::spawn(move || {
+            let (stream, peer) = listener.accept().unwrap();
+            let endpoint = Endpoint { protocol_version: 1, address: address.to_string(), token: "secret".into(), document_id: "document".into() };
+            serve(stream, &endpoint, &sender, &AtomicBool::new(false), &egui::Context::default(), &RateLimit::default(), &peer.to_string());
+        });
+        let mut client = TcpStream::connect(address).unwrap();
+        client.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        writeln!(client, "{}", json!({"token":"secret","document_id":"document","tool":"desigma_get_document","args":{},"client_id":"test"})).unwrap();
+        let queued = receiver.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(queued.tool, "desigma_get_document");
+        assert_eq!(queued.client_id, "test");
+        queued.reply.send(json!({"result":{"ok":true}})).unwrap();
+        let mut response = String::new();
+        BufReader::new(&mut client).read_line(&mut response).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&response).unwrap()["result"]["ok"], true);
+        drop(client);
+        server.join().unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn endpoint_directory_acl_is_restricted_to_current_user() {
+        let path = std::env::temp_dir().join(format!("desigma-agent-acl-{}", uuid::Uuid::new_v4()));
+        private_directory(&path).unwrap();
+        let endpoint = path.join("endpoint.json");
+        fs::write(&endpoint, b"{}").unwrap();
+        let username = std::env::var("USERNAME").unwrap();
+        for (target, inherited) in [(&path, false), (&endpoint, true)] {
+            let output = std::process::Command::new("icacls").arg(target).output().unwrap();
+            assert!(output.status.success(), "icacls could not inspect {target:?}");
+            let listing = String::from_utf8_lossy(&output.stdout);
+            let user_ace = listing.lines().find(|line| line.contains(&username)).expect("current user ACE missing");
+            assert!(user_ace.contains("(F)"), "current user lacks full control: {user_ace}");
+            assert_eq!(user_ace.contains("(I)"), inherited, "unexpected inheritance on {target:?}: {user_ace}");
+        }
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn endpoint_directory_acl_failure_is_reported() {
+        let path = std::env::temp_dir().join(format!("desigma-agent-acl-failure-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&path).unwrap();
+        let invalid_principal = format!("DESIGMA_MISSING_{}", uuid::Uuid::new_v4().simple());
+        let result = restrict_windows_acl(&path, &invalid_principal);
+        fs::remove_dir_all(path).unwrap();
+        assert!(result.is_err(), "icacls unexpectedly accepted a nonexistent account");
+        assert_eq!(result.unwrap_err().to_string(), "Cannot restrict endpoint directory ACL");
     }
 }

@@ -49,6 +49,9 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
+      - name: Agent model-runner unit tests
+        run: python -m unittest scripts/test_agent_model_eval.py
+
   lint:
     name: Clippy
     runs-on: ubuntu-latest

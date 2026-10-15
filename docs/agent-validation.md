@@ -70,8 +70,11 @@ document replacement, quit cleanup, and stale endpoint handling on macOS.
 The real-model evaluation runner was attempted twice. One trial was blocked by
 client approval and one failed during MCP startup; both are recorded in
 `agent-model-eval-attempts.jsonl`. Neither trial produced a scored model success
-rate. Linux and Windows CI execution, Windows ACL and loopback checks, cross-OS
-live smoke, and upstream acceptance remain open release evidence. The narrow
+rate. Linux and Windows CI execution, Windows ACL and loopback test results,
+cross-OS live smoke, and upstream acceptance remain open release evidence.
+The Windows CI suite now includes endpoint ACL inspection, the `icacls` failure
+path, and an authenticated loopback exchange; their outcome requires a Windows
+runner. The narrow
 [shared-engine extraction PR](https://github.com/deepfounder-ai/desigma/pull/2)
 was submitted as a draft after 776 focused tests passed on macOS.
 
