@@ -15,6 +15,7 @@ use egui::{Align2, Context, Id, Key, Modifiers, Pos2, Rect, Sense, Vec2};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Action {
+    AgentAccess,
     New,
     /// File -> New board.
     NewBoard,
@@ -114,6 +115,7 @@ pub enum Action {
 
 pub fn run(app: &mut App, ctx: &Context, a: Action) {
     match a {
+        Action::AgentAccess => app.agent.controls_open = true,
         Action::New => app.new_file_here(),
         Action::NewBoard => app.new_board_here(),
         Action::NewDeck => app.new_deck_here(),
@@ -358,7 +360,7 @@ fn main_nodes(app: &App) -> Vec<Node> {
         file.push(leaf("Export all slides as PDF…", "", Action::ExportDeckPdf).off(app.deck_pdf_slides(true).is_err()));
     }
     let edit = vec![
-        leaf("Undo", "Ctrl+Z", Action::Undo).off(!app.hist.can_undo()),
+        leaf(if app.hist.undo_label() == Some("Agent edit") { "Undo Agent edit" } else { "Undo" }, "Ctrl+Z", Action::Undo).off(!app.hist.can_undo()),
         leaf("Redo", "Ctrl+Shift+Z", Action::Redo).off(!app.hist.can_redo()).sep(),
         leaf("Copy", "Ctrl+C", Action::Copy).off(!has_sel),
         leaf("Paste", "Ctrl+V", Action::Paste).off(app.clip.is_none()),
@@ -454,6 +456,7 @@ fn main_nodes(app: &App) -> Vec<Node> {
         submenu("Arrange", arrange),
         submenu("Vector", vector).sep(),
         leaf("Plugins", "", Action::Plugins),
+        leaf("Agent access…", "", Action::AgentAccess),
         stub_sub("Widgets"),
         submenu(
             "Preferences",
@@ -526,7 +529,12 @@ fn file_items(app: &App) -> Vec<(MenuItem, Option<Action>)> {
         (MenuItem::new("Save to library…").disabled(app.lib.is_none() || app.lib_file.is_some()).sep(), Some(Action::SaveToLibrary)),
         (MenuItem::new("Show version history").checked(app.history.open), Some(Action::ToggleVersionHistory)),
         (MenuItem::new("Save to version history…").shortcut("Ctrl+Alt+S").disabled(!app.has_history()).sep(), Some(Action::SaveVersion)),
-        (MenuItem::new("Undo").shortcut("Ctrl+Z").disabled(!app.hist.can_undo()), Some(Action::Undo)),
+        (
+            MenuItem::new(if app.hist.undo_label() == Some("Agent edit") { "Undo Agent edit" } else { "Undo" })
+                .shortcut("Ctrl+Z")
+                .disabled(!app.hist.can_undo()),
+            Some(Action::Undo),
+        ),
         (MenuItem::new("Redo").shortcut("Ctrl+Shift+Z").disabled(!app.hist.can_redo()).sep(), Some(Action::Redo)),
         (MenuItem::new("Select all").shortcut("Ctrl+A"), Some(Action::SelectAll)),
         (MenuItem::new("Group selection").shortcut("Ctrl+G").disabled(!has_sel), Some(Action::Group)),

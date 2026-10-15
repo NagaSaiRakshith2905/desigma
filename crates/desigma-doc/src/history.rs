@@ -64,6 +64,18 @@ pub enum Command {
         variables: BTreeMap<String, Variable>,
         collections: BTreeMap<String, VariableCollection>,
     },
+    /// Insert, replace or remove one embedded image asset.
+    SetImage {
+        key: String,
+        bytes: Option<Vec<u8>>,
+    },
+    /// Insert/remove the hidden library page without adding it to visible pages.
+    InsertLibraryPage {
+        nodes: Vec<Node>,
+    },
+    RemoveLibraryPage {
+        id: NodeId,
+    },
     Batch(Vec<Command>),
 }
 
@@ -148,6 +160,37 @@ impl Command {
                 variables: std::mem::replace(&mut doc.variables, variables),
                 collections: std::mem::replace(&mut doc.variable_collections, collections),
             },
+            Command::SetImage { key, bytes } => {
+                let old = match bytes {
+                    Some(bytes) => doc.images.insert(key.clone(), bytes),
+                    None => doc.images.remove(&key),
+                };
+                Command::SetImage { key, bytes: old }
+            }
+            Command::InsertLibraryPage { nodes } => {
+                let root = nodes.first().ok_or(DocError::NotFound(NodeId(0)))?;
+                if !matches!(root.kind, NodeKind::Page { .. }) || root.parent.is_some() {
+                    return Err(DocError::NotAContainer(root.id));
+                }
+                let id = root.id;
+                let old = doc.library_page.and_then(|old_id| doc.remove(old_id).ok());
+                for node in nodes {
+                    doc.nodes.insert(node.id, node);
+                }
+                doc.library_page = Some(id);
+                if let Some(nodes) = old {
+                    Command::InsertLibraryPage { nodes }
+                } else {
+                    Command::RemoveLibraryPage { id }
+                }
+            }
+            Command::RemoveLibraryPage { id } => {
+                let nodes = doc.remove(id)?;
+                if doc.library_page == Some(id) {
+                    doc.library_page = None;
+                }
+                Command::InsertLibraryPage { nodes }
+            }
             Command::Batch(cmds) => {
                 let mut inv = Vec::with_capacity(cmds.len());
                 for c in cmds {
@@ -169,28 +212,76 @@ impl Document {
 }
 
 /// Linear undo stack.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct History {
     undo: Vec<Command>,
     redo: Vec<Command>,
+    undo_labels: Vec<Option<String>>,
+    redo_labels: Vec<Option<String>>,
+    undo_revisions: Vec<u64>,
+    redo_revisions: Vec<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct HistoryEntry {
+    pub revision: u64,
+    pub label: Option<String>,
 }
 
 impl History {
     pub fn exec(&mut self, doc: &mut Document, cmd: Command) -> Result<(), DocError> {
-        let inv = cmd.apply(doc)?;
+        let revision = doc.revision.checked_add(1).ok_or(DocError::RevisionExhausted)?;
+        let mut staged = doc.clone();
+        let inv = cmd.apply(&mut staged)?;
+        staged.revision = revision;
+        *doc = staged;
         self.undo.push(inv);
         self.redo.clear();
+        self.redo_labels.clear();
+        self.redo_revisions.clear();
+        self.undo_labels.push(None);
+        self.undo_revisions.push(revision);
         Ok(())
     }
     pub fn undo(&mut self, doc: &mut Document) -> Result<bool, DocError> {
-        let Some(c) = self.undo.pop() else { return Ok(false) };
-        self.redo.push(c.apply(doc)?);
+        let Some(c) = self.undo.last().cloned() else { return Ok(false) };
+        let revision = doc.revision.checked_add(1).ok_or(DocError::RevisionExhausted)?;
+        let mut staged = doc.clone();
+        let inverse = c.apply(&mut staged)?;
+        staged.revision = revision;
+        *doc = staged;
+        self.undo.pop();
+        self.redo_labels.push(self.undo_labels.pop().flatten());
+        self.redo_revisions.push(self.undo_revisions.pop().unwrap_or(revision));
+        self.redo.push(inverse);
         Ok(true)
     }
     pub fn redo(&mut self, doc: &mut Document) -> Result<bool, DocError> {
-        let Some(c) = self.redo.pop() else { return Ok(false) };
-        self.undo.push(c.apply(doc)?);
+        let Some(c) = self.redo.last().cloned() else { return Ok(false) };
+        let revision = doc.revision.checked_add(1).ok_or(DocError::RevisionExhausted)?;
+        let mut staged = doc.clone();
+        let inverse = c.apply(&mut staged)?;
+        staged.revision = revision;
+        *doc = staged;
+        self.redo.pop();
+        self.undo_labels.push(self.redo_labels.pop().flatten());
+        self.redo_revisions.pop();
+        self.undo_revisions.push(revision);
+        self.undo.push(inverse);
         Ok(true)
+    }
+    /// Attach a human-readable source label to the latest committed undo step.
+    pub fn label_last(&mut self, label: impl Into<String>) {
+        if let Some(slot) = self.undo_labels.last_mut() {
+            *slot = Some(label.into());
+        }
+    }
+    pub fn undo_label(&self) -> Option<&str> {
+        self.undo_labels.last().and_then(|s| s.as_deref())
+    }
+    /// The committed steps currently available to undo, oldest first.
+    pub fn entries(&self) -> Vec<HistoryEntry> {
+        self.undo_revisions.iter().zip(&self.undo_labels).map(|(revision, label)| HistoryEntry { revision: *revision, label: label.clone() }).collect()
     }
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
@@ -286,5 +377,69 @@ mod style_tests {
         assert!(d.styles.is_empty() && d.style_meta.is_empty());
         h.redo(&mut d).unwrap();
         assert_eq!(d.styles.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod transaction_safety_tests {
+    use super::*;
+    #[test]
+    fn failing_batch_preserves_document_revision_and_redo() {
+        let mut doc = Document::new("atomic");
+        let page = doc.add_page("P");
+        let id = doc.alloc_id();
+        doc.insert(page, Node::rectangle(id, Rect::new(0.0, 0.0, 10.0, 10.0))).unwrap();
+        let mut history = History::default();
+        let mut node = doc.get(id).unwrap().clone();
+        node.opacity = 0.3;
+        history.exec(&mut doc, Command::Update { node: Box::new(node.clone()) }).unwrap();
+        history.undo(&mut doc).unwrap();
+        let before = doc.to_json().unwrap();
+        assert!(history.exec(&mut doc, Command::Batch(vec![Command::Update { node: Box::new(node) }, Command::Remove { id: NodeId(9999) }])).is_err());
+        assert_eq!(doc.to_json().unwrap(), before);
+        assert!(history.can_redo());
+        assert!(!history.can_undo());
+        history.redo(&mut doc).unwrap();
+        assert_eq!(doc.revision, 3);
+    }
+    #[test]
+    fn revisions_and_labels_survive_undo_and_redo() {
+        let mut doc = Document::new("labels");
+        doc.add_page("P");
+        let mut history = History::default();
+        history.exec(&mut doc, Command::SetFlows { flows: vec![] }).unwrap();
+        history.label_last("Agent edit");
+        assert_eq!(doc.revision, 1);
+        assert_eq!(history.undo_label(), Some("Agent edit"));
+        assert_eq!(history.entries(), vec![HistoryEntry { revision: 1, label: Some("Agent edit".into()) }]);
+        history.undo(&mut doc).unwrap();
+        assert_eq!(doc.revision, 2);
+        assert!(history.entries().is_empty());
+        history.redo(&mut doc).unwrap();
+        assert_eq!(doc.revision, 3);
+        assert_eq!(history.entries(), vec![HistoryEntry { revision: 3, label: Some("Agent edit".into()) }]);
+        assert_eq!(history.undo_label(), Some("Agent edit"));
+        doc.revision = u64::MAX;
+        let before = doc.to_json().unwrap();
+        assert!(history.undo(&mut doc).is_err());
+        assert_eq!(doc.to_json().unwrap(), before);
+        assert!(history.can_undo());
+    }
+}
+
+#[cfg(test)]
+mod allocator_safety_tests {
+    use super::*;
+    #[test]
+    fn ordinary_allocation_recovers_imported_counter() {
+        let mut doc = Document::new("import");
+        let page = doc.add_page("P");
+        doc.nodes.insert(NodeId(1000), Node::rectangle(NodeId(1000), Rect::new(0.0, 0.0, 1.0, 1.0)));
+        assert_eq!(doc.alloc_id(), NodeId(1001));
+        assert!(doc.get(page).is_some());
+        assert_eq!(doc.remaining_node_ids(), u64::MAX - 1001);
+        doc.reserve_ids(NodeId(u64::MAX));
+        assert_eq!(doc.remaining_node_ids(), 0);
+        assert!(doc.try_alloc_id().is_none());
     }
 }

@@ -136,6 +136,23 @@ pub fn available_families() -> Vec<String> {
     })
 }
 
+/// Installed faces visible to the renderer, including bundled and registered data.
+/// Returned in a stable order so agent clients can cache the inventory.
+pub fn available_faces() -> Vec<(String, u16, bool, bool)> {
+    with_fonts(|f| {
+        let mut faces: Vec<_> =
+            f.fs.db()
+                .faces()
+                .filter_map(|face| {
+                    face.families.first().map(|(family, _)| (family.clone(), face.weight.0, face.style != fontdb::Style::Normal, f.bundled.contains(&face.id)))
+                })
+                .collect();
+        faces.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+        faces.dedup();
+        faces
+    })
+}
+
 /// Compatible alias of [`register_font`].
 pub fn load_font_data(data: Vec<u8>) {
     register_font(data)

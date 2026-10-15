@@ -54,6 +54,7 @@ impl Ctx {
     fn new(doc: &Document) -> Self {
         Ctx {
             s: Document {
+                revision: doc.revision,
                 name: String::new(),
                 kind: doc.kind,
                 nodes: doc.nodes.clone(),

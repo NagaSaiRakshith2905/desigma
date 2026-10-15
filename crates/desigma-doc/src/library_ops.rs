@@ -1007,7 +1007,7 @@ pub fn apply_style_values(n: &mut Node, style: &Style, prop: StyleProperty, key:
 }
 
 /// Where to put an instance of an imported component.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Placement {
     pub parent: NodeId,
     pub at: Vec2,

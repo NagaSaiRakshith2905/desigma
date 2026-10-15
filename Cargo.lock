@@ -899,12 +899,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
+name = "desigma-agent-core"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "desigma-doc",
+ "desigma-engine",
+ "desigma-export",
+ "desigma-render",
+ "serde",
+ "serde_json",
+ "tiny-skia",
+]
+
+[[package]]
 name = "desigma-app"
 version = "0.1.0"
 dependencies = [
  "arboard",
  "cosmic-text",
+ "desigma-agent-core",
  "desigma-doc",
+ "desigma-engine",
  "desigma-export",
  "desigma-fig",
  "desigma-fonts",
@@ -947,6 +963,21 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "desigma-engine"
+version = "0.1.0"
+dependencies = [
+ "desigma-doc",
+ "desigma-export",
+ "desigma-render",
+ "desigma-svg",
+ "image",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -1019,8 +1050,9 @@ dependencies = [
 name = "desigma-mcp"
 version = "0.1.0"
 dependencies = [
+ "desigma-agent-core",
  "desigma-doc",
- "desigma-export",
+ "desigma-engine",
  "desigma-library",
  "rmcp",
  "serde",

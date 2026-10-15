@@ -1,0 +1,27 @@
+//! GUI independent, transactional design editing shared by editor and agents.
+mod agent;
+pub mod agent_extras;
+pub mod assets_ops;
+pub mod board_ops;
+pub mod comments_ops;
+pub mod components;
+pub mod connect;
+pub mod decks_ops;
+pub mod design_ops;
+pub mod duplicate_ops;
+pub mod edit;
+pub mod export_ops;
+pub mod handoff_ops;
+pub mod layout;
+pub mod library_ops;
+pub mod prototype_variables;
+pub mod prototyping;
+mod resize;
+pub mod style_ops;
+pub mod textmeasure;
+mod util;
+pub mod variable_ops;
+pub mod variables;
+pub mod vector_ops;
+pub use agent::*;
+pub use resize::apply_resize;

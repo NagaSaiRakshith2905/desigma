@@ -43,6 +43,9 @@ jobs:
       - name: Build
         run: cargo build --workspace --all-targets --locked
 
+      - name: MCP executable smoke
+        run: cargo run --locked -p desigma-mcp -- --help
+
       - name: Test
         run: cargo test --workspace --locked
 

@@ -5,8 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+desigma-agent-core.workspace = true
 desigma-doc.workspace = true
-desigma-export.workspace = true
+desigma-engine.workspace = true
 desigma-library.workspace = true
 serde.workspace = true
 serde_json.workspace = true

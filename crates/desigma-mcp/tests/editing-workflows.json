@@ -1,0 +1,188 @@
+{
+  "version": 2,
+  "setup": "Use a fresh disposable offline session or a dedicated live editor document for every attempt. Seed an auto-layout frame with one fill child and one fixed child, two component variants, an instance, a color variable and fixed-size overflowing text. Obtain every ID and current revision from inspection. Never mutate a user's working document for evaluation.",
+  "results": "Record one JSONL object per attempt. Run scripts/agent_model_eval.py --task <id> for executable tasks. It launches Codex CLI with a private stdio Desigma MCP server and disposable workspace, then scores the saved document structure. Tool-call and token usage come only from Codex JSONL events; unknown counts are omitted.",
+  "runner": "scripts/agent_model_eval.py",
+  "tasks": [
+    {
+      "id": "resize_auto_layout",
+      "prompt": "Resize the horizontal auto-layout frame to 320 pixels wide, verify the fill child expands and the fixed child stays fixed, and inspect the rendered result.",
+      "assertions": [
+        "frame width equals 320",
+        "padding and gap stay constant",
+        "fill child receives remaining content width",
+        "get_layout agrees with stored geometry",
+        "one undo restores all changed nodes",
+        "redo restores the same rendered pixels"
+      ],
+      "automated_check": "cargo test --locked -p desigma-engine --test agent_workflows resize_matches_ui_entry_point_and_undo_redo_pixels",
+      "evaluation": {
+        "fixture": "resize",
+        "checks": [
+          {
+            "target": "target",
+            "path": "size.x",
+            "equals": 320
+          },
+          {
+            "target": "fixed_child",
+            "path": "size.x",
+            "equals": 50
+          }
+        ]
+      }
+    },
+    {
+      "id": "switch_variant",
+      "prompt": "Switch the existing component instance to the other variant while preserving applicable overrides, inspect it and render it.",
+      "assertions": [
+        "instance points to the requested variant",
+        "descendants reflect the target variant",
+        "applicable overrides survive",
+        "one undo restores the original instance subtree"
+      ],
+      "automated_check": "cargo test --locked -p desigma-engine --test agent_workflows create_instance_and_switch_variant_preserve_override_and_undo"
+    },
+    {
+      "id": "bind_fill",
+      "prompt": "Bind the rectangle's first fill to the existing color variable, then change that variable and verify the effective fill.",
+      "assertions": [
+        "fills/0 binding refers to the existing variable ID",
+        "resolved fill follows the selected mode",
+        "changing the variable changes rendered color",
+        "undo restores both transaction states in order"
+      ],
+      "automated_check": "cargo test --locked -p desigma-engine --test agent_workflows variable_bound_fill_changes_render_and_undo_restores_binding_and_color"
+    },
+    {
+      "id": "atomic_multi_node",
+      "prompt": "Rename two nodes as one batch. Preview first, then commit and undo once. Try a batch whose second node is missing and confirm there are no partial edits.",
+      "assertions": [
+        "dry run does not change document, revision or history",
+        "both renames commit together",
+        "one undo restores both",
+        "missing node returns missing_node",
+        "failure preserves redo and original document"
+      ],
+      "automated_check": "cargo test --locked -p desigma-engine --test agent_workflows dry_run_and_failed_batch_preserve_document_and_redo"
+    },
+    {
+      "id": "correct_text_overflow",
+      "prompt": "Find the overflowing fixed-size text from diagnostics, resize its box so the text fits, then rerun diagnostics and render it.",
+      "assertions": [
+        "diagnostics identify the overflowing text ID before editing",
+        "no text_overflow remains for that node after editing",
+        "render contains the full content",
+        "one undo restores the previous box"
+      ]
+    },
+    {
+      "id": "stale_revision",
+      "prompt": "Read a revision, make a valid change, undo it, then try to write using the originally read revision. Inspect the response and document.",
+      "assertions": [
+        "write returns stale_revision",
+        "revision is monotonic across undo",
+        "failed write changes neither document nor redo history"
+      ],
+      "automated_check": "cargo test --locked -p desigma-engine --test agent_workflows stale_context_is_rejected_after_edit_and_undo"
+    },
+    {
+      "id": "live_edit_and_revoke",
+      "prompt": "Discover and attach to the dedicated editor, inspect selection and viewport, apply one batch, undo in the editor, then pause and revoke access using the editor controls.",
+      "assertions": [
+        "live context matches the editor document identity",
+        "write is visible in the open editor",
+        "one editor undo restores the original",
+        "writes while dragging return operation_conflict",
+        "paused and revoked access cannot mutate",
+        "closed or replacement document is rejected",
+        "expired queued writes are not applied later"
+      ]
+    },
+    {
+      "id": "model_text_styling",
+      "prompt": "Set the Evaluation target text style to 32 px and weight 700. Inspect the layer and verify the final style before saving.",
+      "assertions": [
+        "Text font size is 32",
+        "Text font weight is 700"
+      ],
+      "evaluation": {
+        "fixture": "text",
+        "checks": [
+          {
+            "target": "target",
+            "path": "kind.Text.style.font_size",
+            "equals": 32
+          },
+          {
+            "target": "target",
+            "path": "kind.Text.style.font_weight",
+            "equals": 700
+          }
+        ]
+      }
+    },
+    {
+      "id": "model_visual_properties",
+      "prompt": "Set the Evaluation target layer's blend mode to Multiply and corner_smoothing to 0.35. Verify both values before saving.",
+      "assertions": [
+        "Blend mode is Multiply",
+        "Corner smoothing is 0.35"
+      ],
+      "evaluation": {
+        "fixture": "visual",
+        "checks": [
+          {
+            "target": "target",
+            "path": "blend",
+            "equals": "Multiply"
+          },
+          {
+            "target": "target",
+            "path": "corner_smoothing",
+            "equals": 0.35
+          }
+        ]
+      }
+    },
+    {
+      "id": "model_component_lifecycle",
+      "prompt": "Turn the Evaluation target frame into a main component. Inspect it to confirm its type, then save.",
+      "assertions": [
+        "Target kind is Component"
+      ],
+      "evaluation": {
+        "fixture": "component",
+        "checks": [
+          {
+            "target": "target",
+            "path": "kind.Component",
+            "exists": true
+          }
+        ]
+      }
+    },
+    {
+      "id": "model_prototype_reaction",
+      "prompt": "Give Evaluation target an OnClick reaction that navigates to Evaluation destination. Verify the reaction and save.",
+      "assertions": [
+        "Target has an OnClick Navigate reaction to destination"
+      ],
+      "evaluation": {
+        "fixture": "prototype",
+        "checks": [
+          {
+            "target": "target",
+            "path": "prototype.reactions.0.trigger",
+            "equals": "OnClick"
+          },
+          {
+            "target": "target",
+            "path": "prototype.reactions.0.actions.0.Navigate.dest",
+            "target_ref": "destination"
+          }
+        ]
+      }
+    }
+  ]
+}
