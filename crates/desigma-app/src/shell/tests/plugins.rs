@@ -46,6 +46,7 @@ fn plugin_svg_inserts_selected_named_geometry_as_one_undo_step() {
     let mut s = Sim::new();
     let mut before = serde_json::to_value(&s.app().doc).unwrap();
     before.as_object_mut().unwrap().remove("next_id");
+    before.as_object_mut().unwrap().remove("revision");
     let count = s.app().doc.nodes.len();
     let previous_history = s.app().hist.can_undo();
     let id = s.shell.app.insert_plugin_svg(PLUGIN_TEST_SVG, "Library icon").unwrap();
@@ -64,7 +65,8 @@ fn plugin_svg_inserts_selected_named_geometry_as_one_undo_step() {
     s.cmd_key(Key::Z);
     let mut undone = serde_json::to_value(&s.app().doc).unwrap();
     undone.as_object_mut().unwrap().remove("next_id");
-    assert_eq!(undone, before, "Undo restores the full document except its monotonic ID allocator");
+    undone.as_object_mut().unwrap().remove("revision");
+    assert_eq!(undone, before, "Undo restores the full document except its monotonic ID allocator and revision");
     assert_eq!(s.app().hist.can_undo(), previous_history);
     s.cmd_key(Key::Y);
     assert_eq!(s.app().doc.nodes.len(), count + 2);

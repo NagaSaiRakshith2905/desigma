@@ -14,6 +14,7 @@ impl App {
     /// Puts `doc` on the canvas with the given undo stack, keeping the view.
     fn install(&mut self, doc: Document, hist: History, page: Option<desigma_doc::NodeId>, selection: Vec<desigma_doc::NodeId>) {
         self.stop_plugin();
+        self.revoke_agent();
         let mut doc = doc;
         crate::io::ensure_page(&mut doc);
         self.page = page.filter(|p| doc.pages.contains(p)).unwrap_or(doc.pages[0]);

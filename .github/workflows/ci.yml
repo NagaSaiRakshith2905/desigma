@@ -43,8 +43,14 @@ jobs:
       - name: Build
         run: cargo build --workspace --all-targets --locked
 
+      - name: MCP executable smoke
+        run: cargo run --locked -p desigma-mcp -- --help
+
       - name: Test
         run: cargo test --workspace --locked
+
+      - name: Agent model-runner unit tests
+        run: python -m unittest scripts/test_agent_model_eval.py
 
   lint:
     name: Clippy

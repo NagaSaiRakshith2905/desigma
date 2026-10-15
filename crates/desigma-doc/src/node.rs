@@ -62,10 +62,14 @@ pub struct Node {
     pub slide: Option<SlideProps>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct SlideProps {
     #[serde(default)]
     pub notes: String,
+    /// Transition used when navigating to this slide in presentation mode.
+    /// `None` means an instant transition. Omitted for older/default slides.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition: Option<Transition>,
 }
 
 /// A node property that an instance can override independently of its main

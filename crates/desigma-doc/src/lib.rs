@@ -53,6 +53,8 @@ pub struct NodeId(pub u64);
 
 #[derive(Debug, thiserror::Error)]
 pub enum DocError {
+    #[error("document revision exhausted")]
+    RevisionExhausted,
     #[error("node {0:?} not found")]
     NotFound(NodeId),
     #[error("cannot move node {0:?} into its own subtree")]
@@ -64,6 +66,9 @@ pub enum DocError {
 /// A whole file: pages at the root, each page a tree of nodes.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Document {
+    /// Monotonic committed edit counter, including undo and redo.
+    #[serde(default)]
+    pub revision: u64,
     pub name: String,
     /// Design file or board (whiteboard) file; decides the toolbar and panels.
     #[serde(default)]
@@ -110,8 +115,13 @@ impl Document {
     }
 
     pub fn alloc_id(&mut self) -> NodeId {
-        self.next_id += 1;
-        NodeId(self.next_id)
+        self.try_alloc_id().expect("document exhausted node IDs")
+    }
+
+    /// Capacity remaining after reserved IDs and imported node keys.
+    pub fn remaining_node_ids(&self) -> u64 {
+        let largest = self.nodes.last_key_value().map_or(0, |(id, _)| id.0);
+        u64::MAX - self.next_id.max(largest)
     }
 
     /// Allocate safely after importing a document whose stored counter may be

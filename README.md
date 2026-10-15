@@ -273,7 +273,11 @@ desigma-diff compare reference.png actual.png --out diff.png   # pixel-compare t
 
 ## MCP integration
 
-Build the local server with `cargo build --locked -p desigma-mcp`, then configure your MCP client to launch `desigma-mcp --workspace /path/to/designs`. It provides 13 tools for importing files, inspecting layers and tokens, generating code, editing with undo/redo, and saving a new `.desigma` file. The server runs an isolated file session; live desktop-editor control is not yet connected. See the [setup and tool reference](crates/desigma-mcp/README.md).
+The release archive includes `desigma-mcp`. For source builds, run `cargo build --locked -p desigma-mcp`. Configure your MCP client to launch `desigma-mcp --workspace /path/to/designs` for an offline file session. It can also attach to an open editor after you enable agent access in that document. See the [setup and tool reference](crates/desigma-mcp/README.md).
+
+In the editor, open **Agent access…** and enable access for the current document. The first MCP request prompts for approval; the connection starts read-only, and edits require the separate **Allow document edits** control. The panel shows recent activity and provides pause and revoke controls. It can copy launch configs for Claude Desktop, Claude Code, Cursor, and VS Code when the bundled `desigma-mcp` executable is beside the editor; these configs contain no endpoint token. Revoking removes the endpoint; enabling access again creates a fresh token. Switching documents or returning to the library disables access. The bridge binds to loopback, stores its discovery file privately, and bounds request size, queue depth, concurrent clients, and request rate. Windows endpoint ACLs are restricted at startup; ACL behavior has not yet been exercised on a Windows host.
+
+Implementation coverage and remaining release evidence are tracked in [agent-readiness status](docs/agent-readiness-status.md) and [validation](docs/agent-validation.md).
 
 ## Native plugin installation
 

@@ -50,8 +50,8 @@ jobs:
       # On Windows, crates/desigma-app/build.rs embeds the icon and version info
       # (rc.exe ships with the runner's Windows SDK); it fails the build under CI
       # if that step breaks, so an icon-less exe is never released.
-      - name: Build desigma and desigma-diff
-        run: cargo build --release --locked --target ${{ matrix.target }} -p desigma-app -p desigma-diff
+      - name: Build desigma, desigma-diff and desigma-mcp
+        run: cargo build --release --locked --target ${{ matrix.target }} -p desigma-app -p desigma-diff -p desigma-mcp
 
       - name: Resolve version
         id: version
@@ -97,7 +97,7 @@ jobs:
       - name: Build both architectures
         run: |
           for t in aarch64-apple-darwin x86_64-apple-darwin; do
-            cargo build --release --locked --target "$t" -p desigma-app -p desigma-diff
+            cargo build --release --locked --target "$t" -p desigma-app -p desigma-diff -p desigma-mcp
           done
 
       - name: Resolve version

@@ -10,8 +10,8 @@ Download the file for your platform from the
 | Linux (x64) | `desigma-<version>-x86_64-unknown-linux-gnu.tar.gz` |
 | macOS, for scripts and CLI use | `desigma-<version>-macos-universal.tar.gz` |
 
-The macOS disk image holds `desigma.app` (the editor, with the `desigma-diff` tool inside). The
-Windows and Linux archives hold the `desigma` editor, the `desigma-diff` tool, the licenses and the
+The macOS disk image holds `desigma.app` (the editor, with the `desigma-diff` and `desigma-mcp` tools inside). The
+Windows and Linux archives hold the `desigma` editor, `desigma-diff`, `desigma-mcp`, the licenses and the
 README. `SHA256SUMS` on the release page lets you check the download:
 
 ```sh
@@ -57,10 +57,11 @@ xattr -dr com.apple.quarantine /Applications/desigma.app
 The app is ad-hoc signed but not notarized by Apple yet, which is why the one-time confirmation
 is needed.
 
-**Command-line tool.** `desigma-diff` lives inside the app:
+**Command-line tools.** `desigma-diff` and `desigma-mcp` live inside the app:
 
 ```sh
 /Applications/desigma.app/Contents/MacOS/desigma-diff --help
+/Applications/desigma.app/Contents/MacOS/desigma-mcp --help
 ```
 
 **Opening files.** `.desigma` and `.fig` files list desigma under **Open With** in Finder.

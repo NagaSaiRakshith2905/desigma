@@ -497,6 +497,12 @@ impl Shell {
 }
 
 impl eframe::App for Shell {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // eframe skips UI for occluded windows, but still runs logic on a repaint request.
+        // Live agent edits must work while the user is focused on their MCP client.
+        self.app.poll_agent(ctx);
+    }
+
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
         [0.17, 0.17, 0.17, 1.0]
     }
@@ -595,6 +601,7 @@ impl Shell {
         let ctx = ui.ctx().clone();
         self.app.now = ctx.input(|i| i.time);
         self.app.poll_plugins();
+        self.app.agent_controls(&ctx);
         self.drive_screenshot(&ctx);
         if ctx.input(|i| i.viewport().close_requested()) {
             crate::decks::ui::flush_notes(&mut self.app);

@@ -109,6 +109,7 @@ pub struct Toast {
 }
 
 pub struct App {
+    pub agent: crate::agent::AgentState,
     pub doc: Document,
     pub hist: History,
     pub page: NodeId,
@@ -171,6 +172,7 @@ impl App {
         let page = doc.pages.first().copied().unwrap_or(NodeId(0));
         Self {
             doc,
+            agent: Default::default(),
             hist: History::default(),
             page,
             selection: vec![],

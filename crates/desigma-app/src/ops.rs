@@ -24,25 +24,7 @@ pub enum Align {
 
 /// Sets size + transform of a node, applying constraints/auto-layout to its
 /// content and fixing ancestors. Shared by canvas resizing and the inspector.
-pub fn apply_resize(doc: &mut Document, ed: &mut Edit, id: NodeId, size: Vec2, transform: Affine, relayout: bool) {
-    let Some(old) = doc.get(id).map(|n| n.size) else { return };
-    if let Some(n) = ed.node(doc, id) {
-        n.size = size;
-        n.transform = transform;
-        if let NodeKind::Text(t) = &mut n.kind {
-            if t.auto_resize == TextAutoResize::WidthAndHeight {
-                t.auto_resize = TextAutoResize::None;
-            }
-        }
-    }
-    if doc.get(id).map(|n| n.kind.is_container()).unwrap_or(false) {
-        layout::apply_constraints(doc, ed, id, old, size);
-        layout::layout_node(doc, ed, id);
-    }
-    if relayout {
-        layout::relayout_up(doc, ed, id);
-    }
-}
+pub use desigma_engine::apply_resize;
 
 /// Rotates every `(node, world transform at start)` by `delta` radians about
 /// the page-space point `center`, keeping each node's parent untouched.
@@ -794,6 +776,7 @@ impl App {
 
     // ------------------------------------------------------------ files
     pub fn replace_document(&mut self, doc: Document, path: Option<PathBuf>) {
+        self.revoke_agent();
         crate::decks::ui::flush_notes(self);
         self.stop_plugin();
         // Pending edits of the library file being left are saved first (from the live state, not an old version).
