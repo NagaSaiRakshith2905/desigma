@@ -30,11 +30,11 @@ class ModelEvalTests(unittest.TestCase):
         executable = {task["id"]: task["evaluation"] for task in catalog["tasks"] if "evaluation" in task}
         self.assertEqual(
             set(executable),
-            {"model_text_styling", "model_visual_properties", "model_component_lifecycle", "model_prototype_reaction", "resize_auto_layout"},
+            {"model_text_styling", "model_visual_properties", "model_component_lifecycle", "model_prototype_reaction", "model_structure_move", "model_variable_binding", "resize_auto_layout"},
         )
         for evaluation in executable.values():
             self.assertTrue(evaluation["checks"])
-            self.assertIn(evaluation["fixture"], {"text", "visual", "component", "prototype", "resize"})
+            self.assertIn(evaluation["fixture"], {"text", "visual", "component", "prototype", "structure", "variable", "resize"})
 
 
 if __name__ == "__main__":

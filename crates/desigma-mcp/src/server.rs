@@ -510,7 +510,8 @@ impl ServerHandler for DesigmaServer {
         Ok(match result {
             Ok(value) if matches!(request.name.as_ref(), "desigma_render_node" | "desigma_render_region" | "desigma_render_diff") => {
                 let data = value["data"].as_str().unwrap_or_default().to_owned();
-                let mut result = CallToolResult::success(vec![ContentBlock::image(data, "image/png")]);
+                let mime_type = value["mime_type"].as_str().unwrap_or("image/png").to_owned();
+                let mut result = CallToolResult::success(vec![ContentBlock::image(data, mime_type)]);
                 let mut metadata = value;
                 if let Some(object) = metadata.as_object_mut() {
                     object.remove("data");

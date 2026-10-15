@@ -151,6 +151,55 @@ mod lint_tests {
         assert_eq!(diverged[0]["suggested_fix"]["dry_run"], true);
         assert_apply_suggestion_is_schema_valid(&doc, &diverged[0]["suggested_fix"]);
     }
+
+    #[test]
+    fn contrast_reports_aa_and_aaa_and_suggests_a_valid_dry_run_fix() {
+        let mut doc = Document::new("contrast");
+        let page = doc.add_page("Page");
+        let frame_id = doc.alloc_id();
+        let frame = doc.insert(page, Node::frame(frame_id, desigma_doc::Rect::new(0., 0., 100., 50.))).unwrap();
+        let style =
+            desigma_doc::TextStyle { font_size: 12.0, fills: vec![desigma_doc::Paint::solid(desigma_doc::Color::rgb(0x80, 0x80, 0x80))], ..Default::default() };
+        let id = doc.alloc_id();
+        doc.insert(frame, Node::text(id, desigma_doc::Rect::new(0., 0., 80., 20.), "Text", style)).unwrap();
+
+        let all = findings(&doc);
+        let low = by_code(&all, "low_text_contrast");
+        assert_eq!(low.len(), 1);
+        assert_eq!(low[0]["wcag_aa_pass"], false);
+        assert_eq!(low[0]["wcag_aaa_pass"], false);
+        assert_eq!(low[0]["wcag_aaa_required_ratio"], 7.0);
+        assert_apply_suggestion_is_schema_valid(&doc, &low[0]["suggested_fix"]);
+
+        // Mid-gray text passes AA on white, but remains an AAA advisory.
+        doc.get_mut(id).unwrap().kind.any_text_mut().unwrap().style.fills = vec![desigma_doc::Paint::solid(desigma_doc::Color::rgb(0x66, 0x66, 0x66))];
+        let all = findings(&doc);
+        let aaa = by_code(&all, "low_text_contrast");
+        assert_eq!(aaa.len(), 1);
+        assert_eq!(aaa[0]["wcag_aa_pass"], true);
+        assert_eq!(aaa[0]["wcag_aaa_pass"], false);
+        assert_eq!(aaa[0]["severity"], "info");
+        assert_apply_suggestion_is_schema_valid(&doc, &aaa[0]["suggested_fix"]);
+    }
+
+    #[test]
+    fn sibling_text_color_and_spacing_outliers_are_reported_as_review_hints() {
+        let mut doc = Document::new("consistency");
+        let page = doc.add_page("Page");
+        let frame_id = doc.alloc_id();
+        let frame = doc.insert(page, Node::frame(frame_id, desigma_doc::Rect::new(0., 0., 150., 40.))).unwrap();
+        for (x, color) in [(0., desigma_doc::Color::BLACK), (22., desigma_doc::Color::BLACK), (52., desigma_doc::Color::rgb(0xff, 0, 0))] {
+            let style = desigma_doc::TextStyle { fills: vec![desigma_doc::Paint::solid(color)], ..Default::default() };
+            let id = doc.alloc_id();
+            doc.insert(frame, Node::text(id, desigma_doc::Rect::new(x, 0., 20., 20.), "Label", style)).unwrap();
+        }
+        let all = findings(&doc);
+        assert_eq!(by_code(&all, "inconsistent_sibling_text_color").len(), 1);
+        let spacing = by_code(&all, "inconsistent_sibling_spacing");
+        assert_eq!(spacing.len(), 1);
+        assert_eq!(spacing[0]["axis"], "horizontal");
+        assert!(spacing[0]["suggested_fix"].is_null());
+    }
 }
 
 fn infer_missing_auto_layout(doc: &Document, frame_id: NodeId) -> Option<AutoLayout> {
@@ -264,6 +313,8 @@ struct RenderArgs {
     node_id: u64,
     #[serde(default = "scale")]
     scale: f32,
+    #[serde(default)]
+    format: RenderFormat,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -275,6 +326,39 @@ struct RegionArgs {
     height: f32,
     #[serde(default = "scale")]
     scale: f32,
+    #[serde(default)]
+    format: RenderFormat,
+}
+#[derive(Clone, Copy, Debug, Default, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum RenderFormat {
+    #[default]
+    Png,
+    Jpeg,
+}
+
+impl RenderFormat {
+    fn encode(self, png: &[u8]) -> Result<(Vec<u8>, &'static str), String> {
+        match self {
+            Self::Png => Ok((png.to_vec(), "image/png")),
+            Self::Jpeg => {
+                let rgba = image::load_from_memory(png).map_err(|e| format!("operation_conflict: cannot decode render for JPEG: {e}"))?.to_rgba8();
+                // JPEG has no alpha channel; composite transparent pixels onto white.
+                let rgb: Vec<u8> = rgba
+                    .pixels()
+                    .flat_map(|pixel| {
+                        let alpha = u32::from(pixel[3]);
+                        (0..3).map(move |channel| ((u32::from(pixel[channel]) * alpha + 255 * (255 - alpha) + 127) / 255) as u8)
+                    })
+                    .collect();
+                let mut bytes = Vec::new();
+                image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 82)
+                    .encode(&rgb, rgba.width(), rgba.height(), image::ExtendedColorType::Rgb8)
+                    .map_err(|e| format!("operation_conflict: cannot encode JPEG render: {e}"))?;
+                Ok((bytes, "image/jpeg"))
+            }
+        }
+    }
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -357,9 +441,10 @@ pub fn call(doc: &Document, name: &str, args: Value) -> Result<Value, String> {
         let mut pixmap = tiny_skia::Pixmap::new(width as u32, height as u32).ok_or("operation_conflict: cannot allocate render")?;
         let resolved = desigma_doc::apply_bound_variables(doc);
         desigma_render::render_page(&resolved, page, &desigma_render::Viewport { offset: Vec2::new(a.x, a.y), zoom: a.scale, dpr: 1.0 }, &mut pixmap);
-        let bytes = pixmap.encode_png().map_err(|e| format!("operation_conflict: cannot encode render: {e}"))?;
+        let png = pixmap.encode_png().map_err(|e| format!("operation_conflict: cannot encode render: {e}"))?;
+        let (bytes, mime_type) = a.format.encode(&png)?;
         return Ok(
-            json!({"page_id":page,"revision":doc.revision,"mime_type":"image/png","data":base64::engine::general_purpose::STANDARD.encode(bytes),"width":width as u32,"height":height as u32}),
+            json!({"page_id":page,"revision":doc.revision,"mime_type":mime_type,"data":base64::engine::general_purpose::STANDARD.encode(bytes),"width":width as u32,"height":height as u32}),
         );
     }
     if name == "desigma_render_node" {
@@ -376,12 +461,13 @@ pub fn call(doc: &Document, name: &str, args: Value) -> Result<Value, String> {
         if !w.is_finite() || !h.is_finite() || w <= 0.0 || h <= 0.0 || w > 4096.0 || h > 4096.0 || w * h > 8_388_608.0 {
             return Err("invalid_operation: render must have positive dimensions, at most 4096 per side and 8 megapixels".into());
         }
-        let bytes = desigma_export::export_png(&resolved, id, a.scale);
-        if bytes.is_empty() {
+        let png = desigma_export::export_png(&resolved, id, a.scale);
+        if png.is_empty() {
             return Err("operation_conflict: renderer produced no image".into());
         }
+        let (bytes, mime_type) = a.format.encode(&png)?;
         return Ok(
-            json!({"node_id":id,"revision":doc.revision,"mime_type":"image/png","data":base64::engine::general_purpose::STANDARD.encode(bytes),"width":w,"height":h}),
+            json!({"node_id":id,"revision":doc.revision,"mime_type":mime_type,"data":base64::engine::general_purpose::STANDARD.encode(bytes),"width":w,"height":h}),
         );
     }
     let resolved;
@@ -461,6 +547,74 @@ pub fn call(doc: &Document, name: &str, args: Value) -> Result<Value, String> {
                 if overlap_count >= 200 {
                     break;
                 }
+
+                // A small, deliberately conservative consistency pass: report
+                // only obvious color outliers among sibling text layers with
+                // matching typography, and only spacing drift in a clear row
+                // or column of at least three siblings.
+                let mut text_groups: std::collections::BTreeMap<(String, u16, u32), Vec<(NodeId, Color)>> = std::collections::BTreeMap::new();
+                for child in &children {
+                    if let Some(text) = child.kind.any_text().filter(|text| text.runs.is_empty()) {
+                        if let Some(color) = solid_color(&text.style.fills) {
+                            text_groups
+                                .entry((text.style.font_family.to_ascii_lowercase(), text.style.font_weight, text.style.font_size.to_bits()))
+                                .or_default()
+                                .push((child.id, color));
+                        }
+                    }
+                }
+                for group in text_groups.values().filter(|group| group.len() >= 3) {
+                    let mut colors: Vec<(Color, Vec<NodeId>)> = Vec::new();
+                    for (id, color) in group {
+                        if let Some((_, ids)) = colors.iter_mut().find(|(existing, _)| existing == color) {
+                            ids.push(*id);
+                        } else {
+                            colors.push((*color, vec![*id]));
+                        }
+                    }
+                    if let Some((_, majority)) = colors.iter().max_by_key(|(_, ids)| ids.len()) {
+                        if majority.len() >= 2 && majority.len() + 1 == group.len() {
+                            if let Some((id, _)) = group.iter().find(|(id, _)| !majority.contains(id)) {
+                                findings.push(json!({"node_id":id,"parent_id":parent.id,"code":"inconsistent_sibling_text_color","severity":"info","message":"This text layer uses a different solid color from otherwise matching sibling text","suggested_fix":null}));
+                            }
+                        }
+                    }
+                }
+
+                let aligned = |horizontal: bool| -> Option<Vec<(f32, f32, NodeId)>> {
+                    let mut items: Vec<_> = children
+                        .iter()
+                        .filter_map(|n| {
+                            n.kind.any_text()?;
+                            let b = world_bounds(doc, n.id)?;
+                            let (start, end, cross_start, cross_end) = if horizontal { (b.0, b.2, b.1, b.3) } else { (b.1, b.3, b.0, b.2) };
+                            Some((start, end, cross_start, cross_end, n.id))
+                        })
+                        .collect();
+                    if items.len() < 3 {
+                        return None;
+                    }
+                    let cross = items[0].2;
+                    if items.iter().any(|item| (item.2 - cross).abs() > 0.5 || (item.3 - items[0].3).abs() > 0.5) {
+                        return None;
+                    }
+                    items.sort_by(|a, b| a.0.total_cmp(&b.0));
+                    if items.windows(2).any(|pair| pair[1].0 < pair[0].1 - 0.5) {
+                        return None;
+                    }
+                    Some(items.into_iter().map(|(start, end, _, _, id)| (start, end, id)).collect())
+                };
+                for horizontal in [true, false] {
+                    if let Some(items) = aligned(horizontal) {
+                        let gaps: Vec<_> = items.windows(2).map(|pair| pair[1].0 - pair[0].1).collect();
+                        let min = gaps.iter().copied().fold(f32::INFINITY, f32::min);
+                        let max = gaps.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                        if max - min > 2.0 && max <= min.max(0.0) * 3.0 + 8.0 {
+                            findings.push(json!({"node_id":items[1].2,"parent_id":parent.id,"code":"inconsistent_sibling_spacing","severity":"info","axis":if horizontal { "horizontal" } else { "vertical" },"gap_range":{"min":min,"max":max},"message":"Aligned sibling text layers have noticeably different gaps","suggested_fix":null}));
+                            break;
+                        }
+                    }
+                }
             }
             for (n, _) in &nodes {
                 let default = n.kind.default_name();
@@ -538,13 +692,16 @@ pub fn call(doc: &Document, name: &str, args: Value) -> Result<Value, String> {
                         if let (Some(fg), Some(bg)) = (solid_color(&t.style.fills), nearest_background(doc, n.parent)) {
                             let ratio = contrast(fg, bg);
                             let large = t.style.font_size >= 24.0 || (t.style.font_size >= 18.66 && t.style.font_weight >= 700);
-                            let threshold = if large { 3.0 } else { 4.5 };
-                            if ratio < threshold {
+                            let aa_threshold = if large { 3.0 } else { 4.5 };
+                            let aaa_threshold = if large { 4.5 } else { 7.0 };
+                            if ratio < aaa_threshold {
                                 let black = Color::BLACK;
                                 let white = Color::WHITE;
                                 let best = if contrast(black, bg) >= contrast(white, bg) { black } else { white };
                                 let mut suggestion = Value::Null;
-                                if contrast(best, bg) >= threshold {
+                                // Offer a dry-run repair only when the best neutral
+                                // foreground meets at least the failed AA criterion.
+                                if contrast(best, bg) >= aa_threshold {
                                     if let Ok(mut style) = serde_json::to_value(&t.style) {
                                         if let Some(first) = style.get_mut("fills").and_then(Value::as_array_mut).and_then(|fills| fills.first_mut()) {
                                             first["kind"] = json!({"Solid":best});
@@ -552,7 +709,7 @@ pub fn call(doc: &Document, name: &str, args: Value) -> Result<Value, String> {
                                         }
                                     }
                                 }
-                                findings.push(json!({"node_id":n.id,"code":"low_text_contrast","severity":"warning","contrast_ratio":ratio,"required_ratio":threshold,"foreground":fg,"background":bg,"message":"Text contrast is below the WCAG contrast threshold for the detected solid colors","suggested_fix":suggestion}));
+                                findings.push(json!({"node_id":n.id,"code":"low_text_contrast","severity":if ratio < aa_threshold { "warning" } else { "info" },"contrast_ratio":ratio,"required_ratio":aa_threshold,"wcag_aa_pass":ratio >= aa_threshold,"wcag_aaa_pass":ratio >= aaa_threshold,"wcag_aaa_required_ratio":aaa_threshold,"foreground":fg,"background":bg,"message":if ratio < aa_threshold { "Text contrast is below WCAG AA for the detected solid colors" } else { "Text contrast meets WCAG AA but is below WCAG AAA for the detected solid colors" },"suggested_fix":suggestion}));
                             }
                         }
                     }

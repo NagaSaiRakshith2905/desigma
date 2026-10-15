@@ -48,6 +48,10 @@ async fn stdio_handshake_discovery_edit_and_error_recovery() {
         assert_eq!(content[0]["type"], "image");
         assert_eq!(content[0]["mimeType"], "image/png");
         assert!(content[0]["data"].as_str().unwrap().starts_with("iVBOR"));
+        let jpeg = client.call_tool(call("desigma_render_node", json!({"node_id":id,"scale":0.5,"format":"jpeg"}))).await.unwrap();
+        let jpeg_content = serde_json::to_value(&jpeg.content).unwrap();
+        assert_eq!(jpeg_content[0]["mimeType"], "image/jpeg");
+        assert!(jpeg_content[0]["data"].as_str().unwrap().starts_with("/9j/"));
         client.call_tool(call("desigma_undo", json!({"expected_revision":1}))).await.unwrap();
         let gone = client.call_tool(call("desigma_get_node", json!({"node_id":id}))).await.unwrap();
         assert_eq!(gone.is_error, Some(true));

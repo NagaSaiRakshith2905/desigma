@@ -183,6 +183,65 @@
           }
         ]
       }
+    },
+    {
+      "id": "model_structure_move",
+      "prompt": "Move Evaluation target into Evaluation destination as its first child, preserving its visible world position. Inspect both nodes before saving.",
+      "assertions": [
+        "Target parent is Evaluation destination",
+        "Target remains visible in the same world position",
+        "One undo restores the original hierarchy"
+      ],
+      "evaluation": {
+        "fixture": "structure",
+        "checks": [
+          {
+            "target": "target",
+            "path": "parent",
+            "target_ref": "destination"
+          }
+        ]
+      }
+    },
+    {
+      "id": "model_variable_binding",
+      "prompt": "Bind Evaluation target's first fill to the existing Accent color variable in Evaluation palette. Verify the binding before saving.",
+      "assertions": [
+        "Target first fill is bound to the Accent variable",
+        "Resolved fill follows the variable value",
+        "One undo removes the binding"
+      ],
+      "evaluation": {
+        "fixture": "variable",
+        "checks": [
+          {
+            "target": "target",
+            "path": "variables.bindings.fills/0",
+            "target_ref": "variable_id"
+          }
+        ]
+      }
+    },
+    {
+      "id": "import_workspace_asset",
+      "prompt": "Import a workspace SVG as editable nodes under the specified frame. Inspect the inserted geometry and confirm a single undo removes it.",
+      "assertions": [
+        "Imported SVG nodes are children of the target frame",
+        "The imported vector renders without missing geometry",
+        "One undo removes all imported nodes"
+      ],
+      "automated_check": "cargo test --locked -p desigma-engine assets_ops::tests::svg_import_is_one_undo_step"
+    },
+    {
+      "id": "build_screen_from_description",
+      "prompt": "Build a responsive account settings screen from a brief using frames, auto layout, text, design tokens and a reusable button component. Compare the render with the reference fixture.",
+      "assertions": [
+        "Required named screen sections are present",
+        "Primary actions use shared component instances",
+        "Text and spacing match reference tolerances",
+        "No diagnostics of error severity remain"
+      ],
+      "reference_render": "Pending curated, licensed reference fixture and agreed pixel tolerance; no scored model trial is claimed."
     }
   ]
 }

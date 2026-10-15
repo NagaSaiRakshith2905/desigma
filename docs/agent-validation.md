@@ -54,11 +54,12 @@ Before calling the live-editor milestone verified, run the desktop app, attach a
 
 ## Local verification evidence (2026-10-15)
 
-On this macOS checkout, `cargo test --workspace --locked` passed **1,450 tests**
+On this macOS checkout, `cargo test --workspace --locked` passed **1,454 tests**
 across 74 suites, with 11 ignored tests and no failures. The added coverage includes
 deep duplication, variant combination, vector operations, style and variable tools,
 prototype expressions, export handoff, MCP resources and prompts, schema examples,
-and live transport behavior. `cargo fmt --all -- --check`, `git diff --check`,
+AA/AAA lint, scaled JPEG rendering, cursor paging, and live transport behavior.
+`cargo fmt --all -- --check`, `git diff --check`,
 the model-runner unit tests, and workspace Clippy with warnings denied also passed.
 
 The macOS live smoke completed 19 tool calls against a disposable editor fixture,

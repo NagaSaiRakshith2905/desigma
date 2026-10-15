@@ -218,13 +218,27 @@ def run_attempt(args):
         page = node_id(new_doc["pages"][0])
         refs = {}
         profile = task["evaluation"]["fixture"]
-        if profile in ("text", "visual", "component", "prototype"):
+        if profile in ("text", "visual", "component", "prototype", "structure", "variable"):
             kind = "text" if profile == "text" else "frame" if profile in ("component", "prototype") else "rectangle"
             revision, target = create_node(prep, revision, page, kind, "Evaluation target", 280 if kind == "text" else 220, 72 if kind == "text" else 140, "Editable heading" if kind == "text" else None)
             refs["target"] = target
         if profile == "prototype":
             revision, destination = create_node(prep, revision, page, "frame", "Evaluation destination", 220, 140)
             refs["destination"] = destination
+        if profile == "structure":
+            revision, destination = create_node(prep, revision, page, "frame", "Evaluation destination", 320, 220)
+            refs["destination"] = destination
+        if profile == "variable":
+            created = prep.call("desigma_apply_ops", {
+                "expected_revision": revision,
+                "ops": [
+                    {"op": "create_variable_collection", "temp_id": "$new1", "name": "Evaluation palette"},
+                    {"op": "create_variable", "temp_id": "$new2", "collection_id": "$new1", "name": "Accent", "kind": "Color"},
+                    {"op": "edit_variable", "id": "$new2", "mode": "$new1_mode", "value": {"Color": {"r": 0.2, "g": 0.4, "b": 0.8, "a": 1.0}}},
+                ],
+            })
+            revision = int(created["revision"])
+            refs["variable_id"] = created["temp_variable_ids"]["$new2"]
         if profile == "resize":
             revision, fill_child = create_node(prep, revision, page, "rectangle", "Fill child", 100, 40)
             revision, fixed_child = create_node(prep, revision, page, "rectangle", "Fixed child", 50, 40)

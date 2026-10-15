@@ -43,6 +43,48 @@ fn region_and_node_diff_are_bounded_and_report_revision() {
 }
 
 #[test]
+fn render_diff_tolerance_is_a_strict_per_channel_threshold() {
+    let mut engine = Engine::default();
+    let first = engine.call("desigma_create_node", json!({"expected_revision":0,"parent_id":1,"kind":"rectangle","width":20,"height":20})).unwrap()["node"]
+        ["id"]
+        .as_u64()
+        .unwrap();
+    let second = engine
+        .call("desigma_create_node", json!({"expected_revision":engine.doc.revision,"parent_id":1,"kind":"rectangle","width":20,"height":20}))
+        .unwrap()["node"]["id"]
+        .as_u64()
+        .unwrap();
+    engine.doc.get_mut(desigma_doc::NodeId(first)).unwrap().fills = vec![desigma_doc::Paint::solid(desigma_doc::Color::rgb(100, 100, 100))];
+    engine.doc.get_mut(desigma_doc::NodeId(second)).unwrap().fills = vec![desigma_doc::Paint::solid(desigma_doc::Color::rgb(102, 100, 100))];
+
+    let at_boundary = engine.call("desigma_render_diff", json!({"node_a":first,"node_b":second,"tolerance":2})).unwrap();
+    let over_boundary = engine.call("desigma_render_diff", json!({"node_a":first,"node_b":second,"tolerance":1})).unwrap();
+    assert_eq!(at_boundary["changed_pixels"], 0);
+    assert!(over_boundary["changed_pixels"].as_u64().unwrap() > 0);
+    assert!(engine.call("desigma_render_diff", json!({"node_a":first,"node_b":second,"tolerance":256})).is_err());
+}
+
+#[test]
+fn node_and_region_render_support_optional_jpeg_output() {
+    let mut engine = Engine::default();
+    let id = engine.call("desigma_create_node", json!({"expected_revision":0,"parent_id":1,"kind":"rectangle","width":40,"height":30})).unwrap()["node"]["id"]
+        .as_u64()
+        .unwrap();
+
+    let node_png = engine.call("desigma_render_node", json!({"node_id":id})).unwrap();
+    assert_eq!(node_png["mime_type"], "image/png");
+    let node_jpeg = engine.call("desigma_render_node", json!({"node_id":id,"scale":0.5,"format":"jpeg"})).unwrap();
+    assert_eq!(node_jpeg["mime_type"], "image/jpeg");
+    assert_eq!((node_jpeg["width"].as_f64().unwrap(), node_jpeg["height"].as_f64().unwrap()), (20.0, 15.0));
+    assert!(node_jpeg["data"].as_str().unwrap().starts_with("/9j/"));
+
+    let region = engine.call("desigma_render_region", json!({"page_id":1,"x":0,"y":0,"width":30,"height":20,"format":"jpeg"})).unwrap();
+    assert_eq!(region["mime_type"], "image/jpeg");
+    assert!(region["data"].as_str().unwrap().starts_with("/9j/"));
+    assert!(engine.call("desigma_render_node", json!({"node_id":id,"format":"webp"})).is_err());
+}
+
+#[test]
 fn font_inventory_contains_bundled_faces() {
     let mut engine = Engine::default();
     let result = engine.call("desigma_list_fonts", json!({})).unwrap();

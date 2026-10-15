@@ -283,9 +283,23 @@ impl Engine {
             }
             "desigma_list_comments" => {
                 let a: CommentListArgs = parse(args)?;
-                let comments = desigma_engine::comments_ops::list_comments(&self.doc, a.page_id.map(NodeId), a.include_resolved, a.offset, a.limit)
+                if a.limit == 0 || a.limit > 500 {
+                    return Err("invalid_operation: limit must be between 1 and 500".into());
+                }
+                let offset = list_cursor_offset(a.cursor.as_deref(), a.offset, self.doc.revision)?;
+                let filtered = self
+                    .doc
+                    .comments
+                    .iter()
+                    .filter(|thread| a.page_id.is_none_or(|page| thread.anchor.page.0 == page))
+                    .filter(|thread| a.include_resolved || !thread.resolved)
+                    .count();
+                let comments = desigma_engine::comments_ops::list_comments(&self.doc, a.page_id.map(NodeId), a.include_resolved, offset, a.limit)
                     .map_err(|e| format!("invalid_operation: {e}"))?;
-                Ok(json!({"revision":self.doc.revision,"comments":comments,"offset":a.offset,"limit":a.limit}))
+                let next = offset.saturating_add(comments.len());
+                Ok(json!({"revision":self.doc.revision,"comments":comments,"offset":offset,"limit":a.limit,"total":filtered,
+                    "next_offset":(a.cursor.is_none() && next < filtered).then_some(next),
+                    "next_cursor":(next < filtered).then(|| format!("{}:{}", self.doc.revision, next))}))
             }
             "desigma_get_history" => {
                 let a: HistoryArgs = parse(args)?;
@@ -362,9 +376,12 @@ impl Engine {
                 let items = self.doc.library.external.iter().filter(|(_,item)| a.library_id.as_ref().is_none_or(|id| &item.library_id == id))
                     .map(|(key,item)| json!({"key":key,"library_id":item.library_id,"version":item.version,"kind":item.kind,"node_id":item.node,"local_key":item.local_key}))
                     .collect::<Vec<_>>();
-                let page = items.iter().skip(a.offset).take(a.limit).cloned().collect::<Vec<_>>();
-                let next = a.offset.saturating_add(a.limit);
-                Ok(json!({"revision":self.doc.revision,"items":page,"total":items.len(),"offset":a.offset,"next_offset":(next<items.len()).then_some(next)}))
+                let offset = list_cursor_offset(a.cursor.as_deref(), a.offset, self.doc.revision)?;
+                let page = items.iter().skip(offset).take(a.limit).cloned().collect::<Vec<_>>();
+                let next = offset.saturating_add(page.len());
+                Ok(json!({"revision":self.doc.revision,"items":page,"total":items.len(),"offset":offset,
+                    "next_offset":(a.cursor.is_none() && next<items.len()).then_some(next),
+                    "next_cursor":(next<items.len()).then(|| format!("{}:{}", self.doc.revision, next))}))
             }
             "desigma_list_pending_updates" => {
                 let a: SnapshotReadArgs = parse(args)?;
@@ -711,6 +728,7 @@ struct CommentListArgs {
     page_id: Option<u64>,
     #[serde(default)]
     include_resolved: bool,
+    cursor: Option<String>,
     #[serde(default)]
     offset: usize,
     #[serde(default = "history_limit")]
@@ -744,6 +762,7 @@ struct SnapshotReadArgs {
 #[serde(deny_unknown_fields)]
 struct LibraryItemsArgs {
     library_id: Option<String>,
+    cursor: Option<String>,
     #[serde(default)]
     offset: usize,
     #[serde(default = "history_limit")]
@@ -751,6 +770,19 @@ struct LibraryItemsArgs {
 }
 fn history_limit() -> usize {
     100
+}
+
+fn list_cursor_offset(cursor: Option<&str>, offset: usize, revision: u64) -> Result<usize, String> {
+    let Some(cursor) = cursor else { return Ok(offset) };
+    if offset != 0 {
+        return Err("invalid_operation: use cursor or offset, not both".into());
+    }
+    let (cursor_revision, position) = cursor.split_once(':').ok_or("invalid_operation: cursor must contain revision:offset")?;
+    let cursor_revision = cursor_revision.parse::<u64>().map_err(|_| "invalid_operation: cursor revision is invalid")?;
+    if cursor_revision != revision {
+        return Err(format!("stale_revision: cursor revision {cursor_revision}, current {revision}"));
+    }
+    position.parse::<usize>().map_err(|_| "invalid_operation: cursor offset is invalid".into())
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -852,7 +884,7 @@ pub fn tools() -> Vec<Value> {
     add(
         "list_library_items",
         "List locally imported library assets, optionally filtering by library ID. Example: {\"library_id\":\"brand\",\"limit\":50}.",
-        json!({"library_id":{"type":"string","maxLength":1024},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":500}}),
+        json!({"library_id":{"type":"string","maxLength":1024},"cursor":{"type":"string","maxLength":128},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":500}}),
         vec![],
         true,
         true,
@@ -869,7 +901,7 @@ pub fn tools() -> Vec<Value> {
     add(
         "list_comments",
         "List document comment threads with page and resolved-state filters. Example: {\"page_id\":1,\"limit\":50}.",
-        json!({"page_id":id,"include_resolved":{"type":"boolean"},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":500}}),
+        json!({"page_id":id,"include_resolved":{"type":"boolean"},"cursor":{"type":"string","maxLength":128},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":500}}),
         vec![],
         true,
         true,
@@ -1135,5 +1167,29 @@ mod tests {
         assert_eq!(e.call_current("desigma_list_libraries", json!({})).unwrap()["revision"], e.doc.revision);
         assert_eq!(e.call_current("desigma_list_library_items", json!({})).unwrap()["total"], 0);
         assert!(e.call_current("desigma_go_to_main_component", json!({"node_id":id})).is_err());
+    }
+
+    #[test]
+    fn comment_and_library_cursors_reject_stale_or_mixed_positions() {
+        let mut e = Engine::default();
+        for index in 0..2 {
+            e.call(
+                "desigma_add_comment",
+                json!({"expected_revision":e.doc.revision,"thread_id":format!("thread-{index}"),"message_id":format!("message-{index}"),
+                    "anchor":{"page":1,"node":null,"offset":{"x":0.0,"y":0.0}},"author":"Tester","text":"Review","created":"2026-10-15T00:00:00Z"}),
+            )
+            .unwrap();
+        }
+        let first = e.call_current("desigma_list_comments", json!({"limit":1})).unwrap();
+        assert_eq!(first["total"], 2);
+        let cursor = first["next_cursor"].as_str().unwrap().to_string();
+        let second = e.call_current("desigma_list_comments", json!({"limit":1,"cursor":cursor})).unwrap();
+        assert_eq!(second["comments"].as_array().unwrap().len(), 1);
+        assert_eq!(second["next_cursor"], Value::Null);
+        assert!(e.call_current("desigma_list_comments", json!({"cursor":cursor,"offset":1})).unwrap_err().starts_with("invalid_operation:"));
+        assert!(e.call_current("desigma_list_library_items", json!({"cursor":cursor,"offset":1})).unwrap_err().starts_with("invalid_operation:"));
+        e.call("desigma_create_node", json!({"expected_revision":e.doc.revision,"parent_id":1,"kind":"rectangle"})).unwrap();
+        assert!(e.call_current("desigma_list_comments", json!({"cursor":cursor})).unwrap_err().starts_with("stale_revision:"));
+        assert!(e.call_current("desigma_list_library_items", json!({"cursor":cursor})).unwrap_err().starts_with("stale_revision:"));
     }
 }

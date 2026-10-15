@@ -907,6 +907,7 @@ dependencies = [
  "desigma-engine",
  "desigma-export",
  "desigma-render",
+ "image",
  "serde",
  "serde_json",
  "tiny-skia",
