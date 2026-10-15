@@ -205,9 +205,14 @@ def run_attempt(args):
     if not codex:
         raise ValueError("Codex CLI executable not found")
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    attempt_dir = Path(tempfile.mkdtemp(prefix=f"{args.task}-", dir=args.output_dir))
+    attempt_dir = Path(tempfile.mkdtemp(prefix=f"{args.task}-", dir=args.output_dir)).resolve()
     workspace = attempt_dir / "workspace"
     workspace.mkdir()
+    # The model CLI runs with a workspace-write sandbox. Launch its MCP process
+    # from inside that disposable workspace as well, rather than from the repo.
+    model_mcp = (attempt_dir / ("desigma-mcp.exe" if os.name == "nt" else "desigma-mcp")).resolve()
+    shutil.copy2(binary, model_mcp)
+    model_mcp.chmod(model_mcp.stat().st_mode | 0o111)
     fixture_path = workspace / "fixture.desigma"
     result_path = workspace / "result.desigma"
     prep = McpClient(binary, workspace)
@@ -277,7 +282,7 @@ def run_attempt(args):
     if args.model:
         command.extend(["--model", args.model])
     command.extend([
-        "-c", "mcp_servers.desigma.command=" + json.dumps(str(binary)),
+        "-c", "mcp_servers.desigma.command=" + json.dumps(str(model_mcp)),
         "-c", "mcp_servers.desigma.args=" + json.dumps(["--workspace", str(workspace)]),
     ])
     started = time.monotonic()

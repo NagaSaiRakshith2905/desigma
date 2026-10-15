@@ -2,7 +2,7 @@ pub mod engine;
 pub mod revision_history;
 
 pub const LIVE_PROTOCOL_VERSION: u32 = 1;
-pub const TOOL_CATALOG_VERSION: u32 = 3;
+pub const TOOL_CATALOG_VERSION: u32 = 4;
 
 mod contract;
 mod verification;

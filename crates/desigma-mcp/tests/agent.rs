@@ -102,6 +102,26 @@ fn style_and_vector_direct_tools_use_atomic_engine() {
 }
 
 #[test]
+fn slide_transition_tool_sets_metadata_as_one_undo_step() {
+    let mut engine = Engine::default();
+    engine.doc.kind = desigma_doc::DocumentKind::Deck;
+    let slide = engine.call("desigma_add_slide", json!({"expected_revision":engine.doc.revision,"page":1,"temp_id":"$new1"})).unwrap()["temp_ids"]["$new1"]
+        .as_u64()
+        .unwrap();
+    let revision = engine.doc.revision;
+    let result = engine
+        .call(
+            "desigma_set_slide_transition",
+            json!({"expected_revision":revision,"id":slide,"transition":{"kind":"Dissolve","easing":"EaseInOut","duration_ms":300}}),
+        )
+        .unwrap();
+    assert_eq!(result["revision"], revision + 1);
+    assert_eq!(engine.doc.get(desigma_doc::NodeId(slide)).unwrap().slide.as_ref().unwrap().transition.unwrap().duration_ms, 300);
+    engine.history.undo(&mut engine.doc).unwrap();
+    assert!(engine.doc.get(desigma_doc::NodeId(slide)).unwrap().slide.as_ref().unwrap().transition.is_none());
+}
+
+#[test]
 fn diagnostics_exposes_missing_font_substitution() {
     let mut e = Engine::default();
     let node =

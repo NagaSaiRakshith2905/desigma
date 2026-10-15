@@ -197,6 +197,11 @@ pub fn tools() -> Vec<Value> {
         ),
         ("set_slide_notes", "Set presenter notes on a slide.", object(json!({"id":node_ref,"notes":{"type":"string","maxLength":100000}}), &["id", "notes"])),
         (
+            "set_slide_transition",
+            "Set or clear a slide transition. Example: {\"id\":2,\"transition\":{\"kind\":\"Dissolve\",\"easing\":\"EaseInOut\",\"duration_ms\":300}}.",
+            object(json!({"id":node_ref,"transition":{"anyOf":[native,{"type":"null"}]}}), &["id", "transition"]),
+        ),
+        (
             "set_export_presets",
             "Replace bounded export settings for a layer or slide.",
             object(json!({"id":node_ref,"presets":{"type":"array","items":native,"maxItems":32}}), &["id", "presets"]),

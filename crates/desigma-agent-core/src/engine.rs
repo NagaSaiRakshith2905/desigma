@@ -217,6 +217,7 @@ impl Engine {
                 | "desigma_delete_slide"
                 | "desigma_reorder_slide"
                 | "desigma_set_slide_notes"
+                | "desigma_set_slide_transition"
                 | "desigma_set_export_presets"
                 | "desigma_import_library_asset"
                 | "desigma_apply_library_updates"
@@ -496,7 +497,14 @@ impl Engine {
                     "svg" => desigma_export::export_svg(&doc, id, &Default::default()),
                     _ => return Err("language must be css, tailwind, react, swiftui, compose, or svg".into()),
                 };
-                Ok(json!({"revision":self.doc.revision,"node_id":id,"language":a.language,"code":code}))
+                let mut result = json!({"revision":self.doc.revision,"node_id":id,"language":a.language,"code":code});
+                if a.include_tokens {
+                    result["tokens"] = token_output(&self.doc, id);
+                }
+                if a.responsive_hints {
+                    result["responsive_hints"] = responsive_hints(&self.doc, id);
+                }
+                Ok(result)
             }
             "desigma_create_node" => self.create(parse(args)?),
             "desigma_update_node" => self.update(parse(args)?),
@@ -832,6 +840,103 @@ struct VariablesArgs {
 struct CodeArgs {
     node_id: u64,
     language: String,
+    #[serde(default)]
+    include_tokens: bool,
+    #[serde(default)]
+    responsive_hints: bool,
+}
+
+fn subtree_ids(doc: &desigma_doc::Document, root: desigma_doc::NodeId) -> Vec<desigma_doc::NodeId> {
+    let mut ids = Vec::new();
+    let mut pending = vec![root];
+    while let Some(id) = pending.pop() {
+        let Some(node) = doc.get(id) else { continue };
+        ids.push(id);
+        pending.extend(node.children.iter().rev().copied());
+    }
+    ids
+}
+
+/// Resolved design token values for bindings used by the generated subtree.
+/// Keep this as metadata so every language's source remains valid source code.
+fn token_output(doc: &desigma_doc::Document, root: desigma_doc::NodeId) -> Value {
+    let mut tokens = std::collections::BTreeMap::<String, Value>::new();
+    for node_id in subtree_ids(doc, root) {
+        let Some(node) = doc.get(node_id) else { continue };
+        for (property, variable_id) in &node.variables.bindings {
+            let Some(variable) = doc.variables.get(variable_id) else { continue };
+            let Some(value) = doc.resolve_variable(node_id, variable_id) else { continue };
+            let name = desigma_export::css_variable_reference(variable);
+            let Some(name) = name.strip_prefix("var(").and_then(|v| v.strip_suffix(')')) else { continue };
+            let value = match value {
+                desigma_doc::VariableValue::Color(c) => json!(desigma_export::css_color(&c, 1.0)),
+                desigma_doc::VariableValue::Number(n) => json!(n),
+                desigma_doc::VariableValue::String(s) => json!(s),
+                desigma_doc::VariableValue::Boolean(b) => json!(b),
+                desigma_doc::VariableValue::Alias(_) => continue,
+            };
+            tokens.entry(name.to_string()).or_insert_with(|| {
+                json!({
+                    "variable_id": variable.id,
+                    "variable_name": variable.name,
+                    "kind": format!("{:?}", variable.kind).to_lowercase(),
+                    "value": value,
+                    "used_by": [{"node_id": node_id, "property": property}],
+                })
+            });
+            if let Some(uses) = tokens.get_mut(name).and_then(|t| t["used_by"].as_array_mut()) {
+                let use_item = json!({"node_id": node_id, "property": property});
+                if !uses.contains(&use_item) {
+                    uses.push(use_item);
+                }
+            }
+        }
+    }
+    Value::Array(
+        tokens
+            .into_iter()
+            .map(|(name, mut token)| {
+                token["name"] = json!(name);
+                token
+            })
+            .collect(),
+    )
+}
+
+/// Layout-derived advice only; it does not infer breakpoints absent from the document.
+fn responsive_hints(doc: &desigma_doc::Document, root: desigma_doc::NodeId) -> Value {
+    let mut hints = Vec::new();
+    for id in subtree_ids(doc, root) {
+        let Some(node) = doc.get(id) else { continue };
+        let Some(frame) = node.kind.frame_props() else { continue };
+        let Some(layout) = frame.auto_layout else { continue };
+        let direction = match layout.direction {
+            desigma_doc::LayoutDirection::Horizontal => "horizontal",
+            desigma_doc::LayoutDirection::Vertical => "vertical",
+        };
+        let fill_children: Vec<u64> = node
+            .children
+            .iter()
+            .filter_map(|child_id| {
+                let child = doc.get(*child_id)?;
+                (if layout.direction == desigma_doc::LayoutDirection::Horizontal {
+                    child.layout_child.horizontal == desigma_doc::Sizing::Fill
+                } else {
+                    child.layout_child.vertical == desigma_doc::Sizing::Fill
+                })
+                .then_some(child_id.0)
+            })
+            .collect();
+        hints.push(json!({
+            "node_id": id,
+            "node_name": node.name,
+            "layout": direction,
+            "wrap": layout.wrap,
+            "recommendation": if layout.wrap { "Preserve wrapping when the available width shrinks." } else { "Consider enabling wrapping or stacking at narrower widths." },
+            "fill_children": fill_children,
+        }));
+    }
+    Value::Array(hints)
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -932,8 +1037,8 @@ pub fn tools() -> Vec<Value> {
     );
     add(
         "generate_code",
-        "Generate developer handoff code or SVG for a layer using resolved variable values. Returns source text; writes no files.",
-        json!({"node_id":id,"language":{"type":"string","enum":["css","tailwind","react","swiftui","compose","svg"]}}),
+        "Generate developer handoff code or SVG for a layer using resolved variable values. Optionally include resolved design token metadata and layout-derived responsive hints. Returns source text; writes no files.",
+        json!({"node_id":id,"language":{"type":"string","enum":["css","tailwind","react","swiftui","compose","svg"]},"include_tokens":{"type":"boolean","default":false},"responsive_hints":{"type":"boolean","default":false}}),
         vec!["node_id", "language"],
         true,
         true,
@@ -1032,6 +1137,53 @@ mod tests {
         let svg = e.call_current("desigma_generate_code", json!({"node_id":id,"language":"svg"})).unwrap();
         assert!(svg["code"].as_str().unwrap().contains("width=\"240\""));
         assert_eq!(e.doc.to_json().unwrap(), before);
+    }
+
+    #[test]
+    fn codegen_options_return_resolved_tokens_and_layout_hints_only_when_requested() {
+        use desigma_doc::{Variable, VariableCollection, VariableKind, VariableMode, VariableValue};
+        let mut e = Engine::default();
+        let frame = create(&mut e, "frame", "Stack");
+        let child = e.doc.alloc_id();
+        e.doc.insert(NodeId(frame), desigma_doc::Node::rectangle(child, desigma_doc::Rect::new(0.0, 0.0, 20.0, 20.0))).unwrap();
+        if let desigma_doc::NodeKind::Frame(props) = &mut e.doc.get_mut(NodeId(frame)).unwrap().kind {
+            props.auto_layout = Some(desigma_doc::AutoLayout { wrap: true, ..Default::default() });
+        }
+        e.doc.variable_collections.insert(
+            "theme".into(),
+            VariableCollection {
+                id: "theme".into(),
+                name: "Theme".into(),
+                modes: vec![VariableMode { id: "light".into(), name: "Light".into() }],
+                default_mode: "light".into(),
+                variables: vec!["brand".into()],
+                key: None,
+            },
+        );
+        e.doc.variables.insert(
+            "brand".into(),
+            Variable {
+                id: "brand".into(),
+                name: "Color/Brand".into(),
+                collection: "theme".into(),
+                kind: VariableKind::Color,
+                values: [("light".into(), VariableValue::Color(desigma_doc::Color::rgb(255, 0, 0)))].into_iter().collect(),
+                description: String::new(),
+                scopes: vec![],
+                hidden_from_publishing: false,
+                key: None,
+            },
+        );
+        e.doc.get_mut(child).unwrap().variables.bindings.insert("fills/0".into(), "brand".into());
+        let default = e.call_current("desigma_generate_code", json!({"node_id":frame,"language":"react"})).unwrap();
+        assert!(default.get("tokens").is_none());
+        assert!(default.get("responsive_hints").is_none());
+        let extended =
+            e.call_current("desigma_generate_code", json!({"node_id":frame,"language":"react","include_tokens":true,"responsive_hints":true})).unwrap();
+        assert_eq!(extended["tokens"][0]["name"], "--color-brand");
+        assert_eq!(extended["tokens"][0]["value"], "#F00");
+        assert_eq!(extended["responsive_hints"][0]["node_id"], frame);
+        assert_eq!(extended["responsive_hints"][0]["wrap"], true);
     }
     fn create(e: &mut Engine, kind: &str, name: &str) -> u64 {
         e.call_current("desigma_create_node", json!({"parent_id":1,"kind":kind,"name":name})).unwrap()["node"]["id"].as_u64().unwrap()

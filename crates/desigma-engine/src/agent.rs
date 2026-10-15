@@ -231,6 +231,11 @@ pub enum Operation {
         id: NodeRef,
         notes: String,
     },
+    SetSlideTransition {
+        id: NodeRef,
+        #[serde(deserialize_with = "strict_native")]
+        transition: Option<Transition>,
+    },
     SetExportPresets {
         id: NodeRef,
         #[serde(deserialize_with = "strict_native")]
@@ -1074,6 +1079,12 @@ fn operation(
             let id = resolve_ref(id, temps)?;
             editable(doc, id)?;
             crate::decks_ops::set_slide_notes(doc, tx, id, notes.clone()).map_err(|e| invalid(e.to_string()))?;
+            explicit.insert(id);
+        }
+        Operation::SetSlideTransition { id, transition } => {
+            let id = resolve_ref(id, temps)?;
+            editable(doc, id)?;
+            crate::decks_ops::set_slide_transition(doc, tx, id, *transition).map_err(|e| invalid(e.to_string()))?;
             explicit.insert(id);
         }
         Operation::SetExportPresets { id, presets } => {

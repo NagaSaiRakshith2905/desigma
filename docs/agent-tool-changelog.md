@@ -4,6 +4,15 @@ The live editor IPC protocol and MCP tool catalog have separate versions. Query
 `desigma_get_capabilities` to read both versions from a running server. The
 editor rejects an unsupported live protocol during attachment.
 
+## Catalog 4 — 2026-10-15 (development)
+
+- Added slide transition metadata and optional resolved-token/responsive-hint
+  output to the code-generation tool.
+- Added scaled JPEG output for node/region renders, AA/AAA and consistency
+  diagnostics, and revision-bound comment/library cursors.
+- Added MCP 2026-07-28 resource subscriptions and revision-change notifications
+  for document, pages, variables and styles. Live IPC protocol remains version 1.
+
 ## Catalog 3 — 2026-10-15 (development)
 
 - Added typed variable, shared-style, comment, vector, board, dev-handoff and

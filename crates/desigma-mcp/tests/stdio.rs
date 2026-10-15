@@ -1,8 +1,8 @@
 //! Real MCP client/server lifecycle across a subprocess, not a mocked dispatcher.
 use rmcp::{
-    model::{CallToolRequestParams, GetPromptRequestParams, ReadResourceRequestParams},
+    model::{CallToolRequestParams, GetPromptRequestParams, ProtocolVersion, ReadResourceRequestParams, ServerNotification, SubscriptionFilter},
     transport::TokioChildProcess,
-    ServiceExt,
+    ClientLifecycleMode, ClientServiceExt,
 };
 use serde_json::{json, Value};
 
@@ -11,7 +11,13 @@ async fn stdio_handshake_discovery_edit_and_error_recovery() {
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
         let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_desigma-mcp"));
         command.arg("--workspace").arg(env!("CARGO_MANIFEST_DIR"));
-        let client = ().serve(TokioChildProcess::new(command).unwrap()).await.unwrap();
+        let client = ()
+            .serve_with_lifecycle(
+                TokioChildProcess::new(command).unwrap(),
+                ClientLifecycleMode::Discover { preferred_versions: vec![ProtocolVersion::V_2026_07_28] },
+            )
+            .await
+            .unwrap();
         assert_eq!(client.peer_info().unwrap().server_info.as_ref().unwrap().name, "desigma-mcp");
         let tools = client.list_all_tools().await.unwrap();
         assert!(tools.len() >= 28);
@@ -31,10 +37,17 @@ async fn stdio_handshake_discovery_edit_and_error_recovery() {
         let doc = client.call_tool(call("desigma_get_document", json!({}))).await.unwrap();
         assert_eq!(doc.is_error, Some(false));
         let page = doc.structured_content.unwrap()["pages"][0]["node_id"].clone();
+        let mut subscription =
+            client.listen(SubscriptionFilter::builder().resource_subscriptions(["desigma://document", "desigma://pages"]).build()).await.unwrap();
+        assert_eq!(subscription.acknowledged().resource_subscriptions.as_ref().unwrap().len(), 2);
         let created = client
             .call_tool(call("desigma_create_node", json!({"expected_revision":0,"parent_id":page,"kind":"rectangle","name":"MCP test","width":120})))
             .await
             .unwrap();
+        let update = tokio::time::timeout(std::time::Duration::from_secs(3), subscription.next()).await.unwrap().unwrap().unwrap();
+        assert!(matches!(update, ServerNotification::ResourceUpdatedNotification(_)));
+        assert!(matches!(subscription.next().await.unwrap().unwrap(), ServerNotification::ResourceUpdatedNotification(_)));
+        subscription.cancel().await.unwrap();
         let id = created.structured_content.unwrap()["node"]["id"].clone();
         let invalid = client.call_tool(call("desigma_update_node", json!({"expected_revision":1,"node_id":id,"width":-1}))).await.unwrap();
         assert_eq!(invalid.is_error, Some(true));

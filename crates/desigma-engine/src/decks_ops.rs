@@ -33,6 +33,16 @@ fn valid_preset(p: &ExportPreset) -> bool {
             ExportConstraint::Width(v) | ExportConstraint::Height(v) => v.is_finite() && (1.0..=100_000.0).contains(&v),
         }
 }
+fn valid_transition(t: &Transition) -> bool {
+    t.duration_ms <= 60_000
+        && match t.easing {
+            Easing::Bezier(v) => v.iter().all(|x| x.is_finite() && x.abs() <= 1_000_000.0),
+            Easing::Spring { mass, stiffness, damping } => {
+                [mass, stiffness, damping].iter().all(|v| v.is_finite() && v.abs() <= 1_000_000.0) && mass > 0.0 && stiffness > 0.0 && damping >= 0.0
+            }
+            _ => true,
+        }
+}
 
 /// Adds a slide after `after` (or at the end), returning its new stable ID.
 pub fn add_slide(doc: &mut Document, tx: &mut Tx, page: NodeId, after: Option<NodeId>, name: Option<String>) -> Result<NodeId, DeckEditError> {
@@ -127,6 +137,25 @@ pub fn set_slide_notes(doc: &mut Document, tx: &mut Tx, id: NodeId, notes: Strin
     Ok(true)
 }
 
+/// Sets the transition used when navigating to a slide; `None` is instant.
+pub fn set_slide_transition(doc: &mut Document, tx: &mut Tx, id: NodeId, transition: Option<Transition>) -> Result<bool, DeckEditError> {
+    if doc.kind != DocumentKind::Deck {
+        return Err(DeckEditError::NotDeck);
+    }
+    if transition.is_some_and(|t| !valid_transition(&t)) {
+        return Err(DeckEditError::Invalid("slide transition"));
+    }
+    if !is_slide(doc, id) {
+        return Err(DeckEditError::MissingNode);
+    }
+    let slide = tx.ed.node(doc, id).ok_or(DeckEditError::MissingNode)?.slide.as_mut().unwrap();
+    if slide.transition == transition {
+        return Ok(false);
+    }
+    slide.transition = transition;
+    Ok(true)
+}
+
 /// Replaces export rows on a layer or slide as one property update.
 pub fn set_export_presets(doc: &mut Document, tx: &mut Tx, id: NodeId, presets: Vec<ExportPreset>) -> Result<bool, DeckEditError> {
     if doc.get(id).is_none() {
@@ -192,6 +221,23 @@ mod tests {
         let mut tx = Tx::new();
         let bad = vec![ExportPreset { constraint: ExportConstraint::Scale(f32::NAN), ..Default::default() }];
         assert_eq!(set_export_presets(&mut d, &mut tx, id, bad), Err(DeckEditError::Invalid("export presets")));
+        assert!(tx.ed.touched().is_empty());
+    }
+
+    #[test]
+    fn slide_transition_round_trips_and_rejects_invalid_values() {
+        let (mut d, _, id) = deck();
+        let transition = Transition { kind: TransitionKind::Dissolve, easing: Easing::EaseInOut, duration_ms: 350 };
+        let mut tx = Tx::new();
+        assert!(set_slide_transition(&mut d, &mut tx, id, Some(transition)).unwrap());
+        assert!(!set_slide_transition(&mut d, &mut tx, id, Some(transition)).unwrap());
+        let encoded = serde_json::to_value(&d).unwrap();
+        let restored: Document = serde_json::from_value(encoded).unwrap();
+        assert_eq!(restored.get(id).unwrap().slide.as_ref().unwrap().transition, Some(transition));
+
+        let mut tx = Tx::new();
+        let bad = Transition { easing: Easing::Spring { mass: 0.0, stiffness: 100.0, damping: 10.0 }, ..transition };
+        assert_eq!(set_slide_transition(&mut d, &mut tx, id, Some(bad)), Err(DeckEditError::Invalid("slide transition")));
         assert!(tx.ed.touched().is_empty());
     }
 }

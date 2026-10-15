@@ -84,7 +84,7 @@ Imports are limited to 64 MiB per file, 100,000 layers, and 256 levels of nestin
 | `desigma_get_node` | Read a complete native node or request selected top-level `fields`. |
 | `desigma_list_styles` | Read shared styles and their metadata. |
 | `desigma_get_variables` | Read collections and tokens; optionally resolve one node's direct bindings in its inherited modes. |
-| `desigma_generate_code` | Return CSS, Tailwind, React, SwiftUI, Compose, or SVG source without writing a file. |
+| `desigma_generate_code` | Return CSS, Tailwind, React, SwiftUI, Compose, or SVG source, with optional resolved token metadata and layout-derived responsive hints. |
 | `desigma_create_node` | Create a frame, group, section, rectangle, ellipse, line, polygon, star, vector, text, boolean, sticky, board shape, or stamp layer. Board kinds require a board document. |
 | `desigma_update_node` | Change name, position, dimensions, visibility, opacity, or plain text. |
 | `desigma_delete_node` | Remove a non-page layer and its descendants. |
@@ -115,7 +115,7 @@ Imports are limited to 64 MiB per file, 100,000 layers, and 256 levels of nestin
 | `desigma_set_comments` / `desigma_create_connector` / `desigma_set_connector` | Edit board comments and connectors. |
 | `desigma_list_comments` / `desigma_add_comment` / `desigma_reply_comment` / `desigma_resolve_comment` | Inspect, create, reply to, resolve, and reopen comment threads. |
 | `desigma_list_components` / `desigma_go_to_main_component` / `desigma_list_flows` | Inspect components, an instance's main component, and prototype flows. |
-| `desigma_add_slide` / `desigma_delete_slide` / `desigma_reorder_slide` / `desigma_set_slide_notes` | Manage deck slides and presenter notes. |
+| `desigma_add_slide` / `desigma_delete_slide` / `desigma_reorder_slide` / `desigma_set_slide_notes` / `desigma_set_slide_transition` | Manage deck slides, presenter notes, and transition metadata. |
 | `desigma_set_export_presets` | Set bounded export presets on a layer or slide. |
 | `desigma_set_dev_status` / `desigma_set_dev_annotations` | Mark handoff state and edit bounded developer annotations. |
 | `desigma_export_node` / `desigma_export_deck_pdf` | Write PNG, SVG, or PDF handoff files in the offline workspace; exports create new files and do not change the document revision. |
@@ -125,14 +125,14 @@ Imports are limited to 64 MiB per file, 100,000 layers, and 256 levels of nestin
 | `desigma_list_libraries` / `desigma_list_library_items` | Inspect enabled libraries and their locally imported assets. |
 | `desigma_import_library_asset` / `desigma_apply_library_updates` / `desigma_enable_library` / `desigma_disable_library` | Import library assets, apply updates, and manage enabled libraries. |
 | `desigma_get_outline` / `desigma_get_layout` / `desigma_get_diagnostics` | Inspect hierarchy, computed layout, or design issues. |
-| `desigma_render_node` | Render a page or layer to PNG image content. |
-| `desigma_render_region` | Render a rectangular page viewport to PNG image content. |
+| `desigma_render_node` | Render a page or layer to PNG or scaled JPEG image content. |
+| `desigma_render_region` | Render a rectangular page viewport to PNG or scaled JPEG image content. |
 | `desigma_render_diff` | Compare two layers and return a difference image and changed-pixel metrics. |
 | `desigma_undo` / `desigma_redo` | Traverse the session's edit history. |
 
 `desigma_list_nodes` defaults to 100 results and accepts 1–500 per call. `parent_id` filters direct children, not all descendants. Coordinates are relative to the parent. Width and height must be non-negative, geometry must be finite and within ±1,000,000, and opacity must be between 0 and 1. Replacing text clears rich-text runs and list ranges. Page roots cannot be edited or deleted by the layer tools.
 
-MCP resources expose `desigma://document`, `desigma://pages`, `desigma://variables`, and `desigma://styles` as JSON. The prompt catalog includes `build_screen`, `apply_design_tokens`, `fix_diagnostics`, and `create_component`. Resources are read on demand; live clients can poll `desigma_get_changes` to detect editor revisions.
+MCP resources expose `desigma://document`, `desigma://pages`, `desigma://variables`, and `desigma://styles` as JSON. The prompt catalog includes `build_screen`, `apply_design_tokens`, `fix_diagnostics`, and `create_component`. MCP 2026-07-28 clients can request `subscriptions/listen` updates for those resources; the server polls document revision and signals all subscribed resources when it changes. Other clients can poll `desigma_get_changes` for editor revisions.
 
 ## Atomic editing and verification
 
